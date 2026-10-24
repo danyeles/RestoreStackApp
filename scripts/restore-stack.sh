@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+
+# Discover applications from jenkins-infra and restore each app independently.
+# A TSV report is written for Jenkins to decide which deployment jobs to start.
+set -uo pipefail
+
+log() {
+    printf '[restore-stack] %s\n' "$*" >&2
+}
+
+fail() {
+    log "ERROR: $*"
+    exit 1
+}
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+infra_repo_url=${INFRA_REPO_URL:-https://github.com/danyeles/jenkins-infra.git}
+infra_branch=${INFRA_BRANCH:-main}
+backup_root=${BACKUP_ROOT:-/mnt/Backups/apps}
+media_mount=${MEDIA_MOUNT:-/mnt/Media}
+app_filter=${APP_NAME:-}
+report_file=${RESTORE_REPORT:-}
+dry_run=${DRY_RUN:-false}
+
+case "${dry_run,,}" in
+    true|1|yes) dry_run=true ;;
+    false|0|no|"") dry_run=false ;;
+    *) fail "DRY_RUN must be true or false (received: $dry_run)" ;;
+esac
+
+for utility in git yq mountpoint; do
+    command -v "$utility" >/dev/null 2>&1 || fail "$utility is required"
+done
+[[ -f $script_dir/restore-app.sh && -r $script_dir/restore-app.sh ]] || fail "restore-app.sh is missing or unreadable"
+
+# These global checks happen before any app is changed. restore-app.sh repeats
+# them as well, so direct invocation of that helper remains safe.
+mountpoint -q "$media_mount" || fail "$media_mount is not mounted"
+[[ -d $backup_root && -r $backup_root ]] || fail "Backup storage is missing or unreadable: $backup_root"
+
+if [[ -n $report_file ]]; then
+    : > "$report_file" || fail "Unable to create restore report: $report_file"
+fi
+
+work_dir=$(mktemp -d) || fail "Unable to create temporary workspace"
+cleanup() {
+    rm -rf -- "$work_dir"
+}
+trap cleanup EXIT
+
+infra_dir="$work_dir/jenkins-infra"
+if ! git clone --quiet --depth 1 --branch "$infra_branch" "$infra_repo_url" "$infra_dir"; then
+    fail "Unable to clone $infra_repo_url (branch: $infra_branch)"
+fi
+
+apps_file="$infra_dir/apps.yaml"
+[[ -f $apps_file && -r $apps_file ]] || fail "apps.yaml was not loaded from $infra_repo_url"
+app_count=$(yq -r '.apps | length' "$apps_file") || fail "Unable to parse $apps_file"
+[[ $app_count =~ ^[0-9]+$ ]] && (( app_count > 0 )) || fail "apps.yaml contains no applications"
+log "Loaded $app_count applications from $apps_file"
+
+app_rows=$(yq -r '.apps[] | [.name, .config] | @tsv' "$apps_file") || fail "Unable to read app entries from $apps_file"
+[[ -n $app_rows ]] || fail "apps.yaml did not provide any app entries"
+
+restored=()
+skipped=()
+failed=()
+found_requested_app=false
+
+record_result() {
+    local status=$1
+    local name=$2
+    local detail=${3:-}
+
+    case "$status" in
+        RESTORED) restored+=("$name") ;;
+        SKIPPED) skipped+=("$name${detail:+ ($detail)}") ;;
+        FAILED) failed+=("$name${detail:+ ($detail)}") ;;
+        *) fail "Internal error: invalid result status $status" ;;
+    esac
+    if [[ -n $report_file ]]; then
+        printf '%s\t%s\n' "$status" "$name" >> "$report_file" || fail "Unable to update restore report: $report_file"
+    fi
+}
+
+while IFS=$'\t' read -r app_name config_path; do
+    [[ -n $app_name ]] || continue
+    if [[ -n $app_filter && $app_name != "$app_filter" ]]; then
+        continue
+    fi
+    found_requested_app=true
+
+    # App identifiers and relative config paths are validated before use to
+    # prevent malformed repository data from escaping the checkout.
+    if [[ ! $app_name =~ ^[A-Za-z0-9._-]+$ ]]; then
+        log "ERROR: Invalid application name in apps.yaml: $app_name"
+        record_result FAILED "$app_name" "invalid app name"
+        continue
+    fi
+    if [[ -z $config_path || $config_path == /* || $config_path == *$'\t'* || $config_path == *$'\n'* ]]; then
+        log "ERROR: Invalid config path for $app_name: $config_path"
+        record_result FAILED "$app_name" "invalid config path"
+        continue
+    fi
+    case "/$config_path/" in
+        */../*)
+            log "ERROR: Invalid config path for $app_name: $config_path"
+            record_result FAILED "$app_name" "invalid config path"
+            continue
+            ;;
+    esac
+
+    config_file="$infra_dir/$config_path"
+    if [[ ! -f $config_file || ! -r $config_file ]]; then
+        log "ERROR: Config file for $app_name is missing or unreadable: $config_path"
+        record_result FAILED "$app_name" "config missing"
+        continue
+    fi
+    log "Processing $app_name using $config_path"
+    log "Processing $app_name using $config_path"
+    if BACKUP_ROOT="$backup_root" MEDIA_MOUNT="$media_mount" DRY_RUN="$dry_run" \
+        bash "$script_dir/restore-app.sh" "$app_name" "$config_file"; then
+        record_result RESTORED "$app_name"
+    else
+        result=$?
+        case $result in
+            2) record_result SKIPPED "$app_name" "backup missing" ;;
+            3) record_result SKIPPED "$app_name" "DRY_RUN: restore preview only" ;;
+            *) record_result FAILED "$app_name" "restore exited with status $result" ;;
+        esac
+    fi
+done <<< "$app_rows"
+
+if [[ -n $app_filter && $found_requested_app != true ]]; then
+    log "ERROR: APP_NAME '$app_filter' was not found in apps.yaml"
+    record_result FAILED "$app_filter" "app not found in apps.yaml"
+fi
+
+print_section() {
+    local heading=$1
+    shift
+    printf '\n%s\n' "$heading"
+    if (( $# == 0 )); then
+        printf '  (none)\n'
+    else
+        printf '  %s\n' "$@"
+    fi
+}
+
+printf '\nRestoreStack final report\n'
+print_section RESTORED "${restored[@]}"
+print_section SKIPPED "${skipped[@]}"
+print_section FAILED "${failed[@]}"
+
+if (( ${#failed[@]} > 0 )); then
+    exit 1
+fi
