@@ -31,9 +31,10 @@ case "${dry_run,,}" in
     *) fail "DRY_RUN must be true or false (received: $dry_run)" ;;
 esac
 
-for utility in git yq mountpoint; do
+for utility in git mountpoint; do
     command -v "$utility" >/dev/null 2>&1 || fail "$utility is required"
 done
+command -v yq >/dev/null 2>&1 || fail "Mike Farah yq v4 is required to read YAML configuration"
 [[ -f $script_dir/restore-app.sh && -r $script_dir/restore-app.sh ]] || fail "restore-app.sh is missing or unreadable"
 
 # These global checks happen before any app is changed. restore-app.sh repeats
