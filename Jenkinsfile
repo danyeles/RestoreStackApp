@@ -11,6 +11,11 @@ pipeline {
             defaultValue: '',
             description: 'Application from apps.yaml to restore; leave empty to restore the full stack.'
         )
+        string(
+            name: 'SKIP_APPS',
+            defaultValue: '',
+            description: 'Comma-separated app names to skip during a full restore, for example: sonarr,radarr.'
+        )
         booleanParam(
             name: 'DRY_RUN',
             defaultValue: false,
@@ -26,10 +31,13 @@ pipeline {
         stage('Restore application configuration') {
             steps {
                 script {
-                    def restoreStatus = sh(
-                        returnStatus: true,
-                        script: 'bash scripts/restore-stack.sh'
-                    )
+                    def restoreStatus
+                    withEnv(["SKIP_APPS=${params.SKIP_APPS ?: ''}"]) {
+                        restoreStatus = sh(
+                            returnStatus: true,
+                            script: 'bash scripts/restore-stack.sh'
+                        )
+                    }
                     if (restoreStatus != 0) {
                         // Keep the deployment stage available so apps restored
                         // successfully can still be brought back online.

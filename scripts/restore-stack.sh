@@ -21,6 +21,7 @@ shared_lib_branch=${SHARED_LIB_BRANCH:-}
 backup_root=${BACKUP_ROOT:-/mnt/Backups/apps}
 media_mount=${MEDIA_MOUNT:-/mnt/Media}
 app_filter=${APP_NAME:-}
+skip_apps_input=${SKIP_APPS:-}
 report_file=${RESTORE_REPORT:-}
 dry_run=${DRY_RUN:-false}
 
@@ -63,6 +64,32 @@ log "Loaded $app_count applications from $apps_file"
 
 app_rows=$(yq -r '.apps[] | .name' "$apps_file") || fail "Unable to read app entries from $apps_file"
 [[ -n $app_rows ]] || fail "apps.yaml did not provide any app entries"
+
+declare -A skip_app_map=()
+if [[ -n $skip_apps_input ]]; then
+    if [[ $skip_apps_input == ,* || $skip_apps_input == *, || $skip_apps_input == *,,* ]]; then
+        fail "SKIP_APPS must be a comma-separated list of application names without empty entries"
+    fi
+
+    IFS=',' read -r -a requested_skip_apps <<< "$skip_apps_input"
+    for skip_app in "${requested_skip_apps[@]}"; do
+        skip_app="${skip_app#"${skip_app%%[![:space:]]*}"}"
+        skip_app="${skip_app%"${skip_app##*[![:space:]]}"}"
+        [[ -n $skip_app ]] || fail "SKIP_APPS contains an empty application name"
+        [[ $skip_app =~ ^[A-Za-z0-9._-]+$ ]] || fail "Invalid application name in SKIP_APPS: $skip_app"
+
+        app_found=false
+        while IFS= read -r manifest_app; do
+            if [[ $manifest_app == "$skip_app" ]]; then
+                app_found=true
+                break
+            fi
+        done <<< "$app_rows"
+        [[ $app_found == true ]] || fail "SKIP_APPS application '$skip_app' was not found in apps.yaml"
+
+        skip_app_map["$skip_app"]=1
+    done
+fi
 
 shared_lib_dir="$work_dir/jenkins-shared-lib"
 if [[ -n $shared_lib_branch ]]; then
@@ -108,6 +135,12 @@ while IFS= read -r app_name; do
             continue
             ;;
     esac
+    if [[ ${skip_app_map[$app_name]+selected} == selected ]]; then
+        log "Skipping application selected in SKIP_APPS: $app_name"
+        record_result SKIPPED "$app_name" "selected to skip"
+        continue
+    fi
+
     backup_names=("$app_name")
     special_backup=false
     case "$app_name" in

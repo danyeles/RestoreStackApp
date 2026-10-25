@@ -27,7 +27,7 @@ RestoreStack restores configuration files; it does not install Docker, mount sto
 1. Create a Jenkins Pipeline job pointing to this repository and its `Jenkinsfile`.
 2. Ensure the Jenkins agent has Bash, Git, GNU tar, `mountpoint`, and [Mike Farah `yq` v4](https://github.com/mikefarah/yq) installed.
 3. Ensure Jenkins can read both `https://github.com/danyeles/jenkins-infra` and `https://github.com/danyeles/jenkins-shared-lib`, access the backup and media mounts, and trigger the corresponding `deploy-<app>` jobs.
-4. Run the `RestoreStack` pipeline. Leave `APP_NAME` empty to restore the full stack, or provide an app name from `apps.yaml` to restore only that application. Set `DRY_RUN` to preview the work without extracting archives or triggering deployment jobs.
+4. Run the `RestoreStack` pipeline. Leave `APP_NAME` empty to restore the full stack, or provide an app name from `apps.yaml` to restore only that application. Use `SKIP_APPS` to omit one or more comma-separated app names during the run. Set `DRY_RUN` to preview the work without extracting archives or triggering deployment jobs.
 
 The Jenkinsfile uses Jenkins' Pipeline `build` step to trigger each `deploy-<app>` job only after that application's restore succeeds. The Pipeline Build Step plugin must be available.
 
@@ -37,6 +37,7 @@ The Jenkinsfile uses Jenkins' Pipeline `build` step to trigger each `deploy-<app
 - For each app name in `apps.yaml`, the matching config YAML is loaded from `resources/configs/<app>.yaml` in the shared-library checkout. The script selects the unique volume ending in `:/config` or `:/app/config`; its host-side path is the restore target.
 - Backup names normally match the app name. Exceptions: `qbittorrent-nox` uses the `qbittorrent` backup, `jellyfin` uses `jellyfin-full`, and `audiobookshelf` restores `audiobookshelf-config` followed by `audiobookshelf-metadata`. All configured backups must exist before extraction starts; a missing special backup marks that app `FAILED`.
 - `qbittorrent-password`, `flaresolverr`, and `tdarr` are excluded from restore and reported as `SKIPPED`.
+- Use the Jenkins `SKIP_APPS` parameter or set `SKIP_APPS=sonarr,radarr` when running from a shell to skip selected applications. Names must exist in `apps.yaml`; invalid or unknown names stop the restore with an error.
 - A missing default `<app>/latest.tar.gz` is a warning and is reported as `SKIPPED`. Other per-app errors are reported as `FAILED`; processing continues for the remaining apps.
 - The final console report contains `RESTORED`, `SKIPPED`, and `FAILED` sections. Jenkins deployment is started only for entries reported as `RESTORED`.
 - Restore operations require `/mnt/Media` to be mounted and the backup directory to exist. Archives are checked for absolute and parent-traversal paths before extraction.
@@ -49,10 +50,11 @@ Run from a machine with the required mounts and tools:
 ```bash
 DRY_RUN=true bash scripts/restore-stack.sh
 APP_NAME=<app-name> bash scripts/restore-stack.sh
+SKIP_APPS=sonarr,radarr bash scripts/restore-stack.sh
 bash scripts/restore-stack.sh
 ```
 
-The shell commands above are examples only; application names are discovered from `apps.yaml` and are not embedded in the implementation. `DRY_RUN` accepts `true` or `false` (case-insensitive). When set to true, potential restores appear in the `SKIPPED` section with a dry-run explanation.
+The shell commands above are examples only; application names are discovered from `apps.yaml` and are not embedded in the implementation. `SKIP_APPS` accepts a comma-separated list of app names from that manifest. `DRY_RUN` accepts `true` or `false` (case-insensitive). When set to true, potential restores appear in the `SKIPPED` section with a dry-run explanation.
 
 To call the per-app helper directly, provide the app name and its config YAML from the shared-library repository. Optional backup names override the default `<app-name>` backup and are extracted in order:
 
