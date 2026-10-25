@@ -13,12 +13,17 @@ fail() {
     exit 1
 }
 
-if [[ $# -ne 2 ]]; then
-    fail "Usage: $0 <app-name> <shared-lib-config-yaml>"
+if [[ $# -lt 2 ]]; then
+    fail "Usage: $0 <app-name> <shared-lib-config-yaml> [backup-name ...]"
 fi
 
 app_name=$1
 config_file=$2
+shift 2
+if (( $# == 0 )); then
+    set -- "$app_name"
+fi
+backup_names=("$@")
 backup_root=${BACKUP_ROOT:-/mnt/Backups/apps}
 media_mount=${MEDIA_MOUNT:-/mnt/Media}
 dry_run=${DRY_RUN:-false}
@@ -72,33 +77,44 @@ if [[ -z $target_dir || $target_dir != /* || $target_dir == / ]]; then
     fail "The /config bind mount must have a non-root absolute host path: $config_mount"
 fi
 
-archive="$backup_root/$app_name/latest.tar.gz"
-if [[ ! -f $archive || ! -r $archive ]]; then
-    log "WARNING: Backup is missing or unreadable; skipping $app_name ($archive)"
-    exit 2
-fi
-
 if ! command -v tar >/dev/null 2>&1; then
     fail "tar is required to extract application backups"
 fi
 
-# Check member names before extraction so an archive cannot write outside the
-# selected configuration directory using absolute paths or ../ traversal.
-archive_members=$(tar -tzf "$archive") || fail "Unable to read backup archive: $archive"
-while IFS= read -r member; do
-    if [[ $member == /* || $member == .. || $member == ../* || $member == */../* || $member == */.. ]]; then
-        fail "Unsafe path in backup archive: $member"
+archives=()
+for backup_name in "${backup_names[@]}"; do
+    if [[ ! $backup_name =~ ^[A-Za-z0-9._-]+$ ]]; then
+        fail "Invalid backup name: $backup_name"
     fi
-done <<< "$archive_members"
+    archive="$backup_root/$backup_name/latest.tar.gz"
+    if [[ ! -f $archive || ! -r $archive ]]; then
+        log "WARNING: Backup is missing or unreadable; skipping $app_name ($archive)"
+        exit 2
+    fi
+
+    # Validate every archive before extracting any, so a missing or unsafe
+    # later archive cannot leave a partially restored application.
+    archive_members=$(tar -tzf "$archive") || fail "Unable to read backup archive: $archive"
+    while IFS= read -r member; do
+        if [[ $member == /* || $member == .. || $member == ../* || $member == */../* || $member == */.. ]]; then
+            fail "Unsafe path in backup archive: $member"
+        fi
+    done <<< "$archive_members"
+    archives+=("$archive")
+done
 
 if [[ $dry_run == true ]]; then
-    log "DRY_RUN: would extract $archive into $target_dir"
+    for archive in "${archives[@]}"; do
+        log "DRY_RUN: would extract $archive into $target_dir"
+    done
     exit 3
 fi
 
 mkdir -p -- "$target_dir" || fail "Unable to create restore target: $target_dir"
-tar --extract --gzip --file="$archive" --directory="$target_dir" \
-    --no-same-owner --no-same-permissions \
-    || fail "Extraction failed for $app_name"
+for archive in "${archives[@]}"; do
+    tar --extract --gzip --file="$archive" --directory="$target_dir" \
+        --no-same-owner --no-same-permissions \
+        || fail "Extraction failed for $app_name from $archive"
+done
 
 log "Restored $app_name into $target_dir"

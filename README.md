@@ -35,8 +35,9 @@ The Jenkinsfile uses Jenkins' Pipeline `build` step to trigger each `deploy-<app
 
 - `scripts/restore-stack.sh` clones the infrastructure repository and reads its `apps.yaml`, then clones the shared-library repository.
 - For each app name in `apps.yaml`, the matching config YAML is loaded from `resources/configs/<app>.yaml` in the shared-library checkout. The script selects the unique volume ending in `:/config`; its host-side path is the restore target.
+- Backup names normally match the app name. Exceptions: `qbittorrent-nox` uses the `qbittorrent` backup, `jellyfin` uses `jellyfin-full`, and `audiobookshelf` restores `audiobookshelf-config` followed by `audiobookshelf-metadata`. All configured backups must exist before extraction starts; a missing special backup marks that app `FAILED`.
 - `qbittorrent-password`, `flaresolverr`, and `tdarr` are excluded from restore and reported as `SKIPPED`.
-- A missing `<app>/latest.tar.gz` is a warning and is reported as `SKIPPED`. Other per-app errors are reported as `FAILED`; processing continues for the remaining apps.
+- A missing default `<app>/latest.tar.gz` is a warning and is reported as `SKIPPED`. Other per-app errors are reported as `FAILED`; processing continues for the remaining apps.
 - The final console report contains `RESTORED`, `SKIPPED`, and `FAILED` sections. Jenkins deployment is started only for entries reported as `RESTORED`.
 - Restore operations require `/mnt/Media` to be mounted and the backup directory to exist. Archives are checked for absolute and parent-traversal paths before extraction.
 - Set `INFRA_BRANCH`, `INFRA_REPO_URL`, `SHARED_LIB_BRANCH`, `SHARED_LIB_REPO_URL`, `BACKUP_ROOT`, or `MEDIA_MOUNT` in Jenkins when your environment differs. The infrastructure branch defaults to `master`; when `SHARED_LIB_BRANCH` is unset, Git uses the shared library repository's default branch.
@@ -53,10 +54,10 @@ bash scripts/restore-stack.sh
 
 The shell commands above are examples only; application names are discovered from `apps.yaml` and are not embedded in the implementation. `DRY_RUN` accepts `true` or `false` (case-insensitive). When set to true, potential restores appear in the `SKIPPED` section with a dry-run explanation.
 
-To call the per-app helper directly, provide the app name and its config YAML from the shared-library repository:
+To call the per-app helper directly, provide the app name and its config YAML from the shared-library repository. Optional backup names override the default `<app-name>` backup and are extracted in order:
 
 ```bash
-bash scripts/restore-app.sh <app-name> <shared-lib-config-yaml>
+bash scripts/restore-app.sh <app-name> <shared-lib-config-yaml> [backup-name ...]
 ```
 
 The helper uses `BACKUP_ROOT` and `DRY_RUN` in the same way as the stack script. A missing backup exits with status 2; a dry-run preview exits with status 3; a successful extraction exits with status 0.

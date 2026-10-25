@@ -108,9 +108,24 @@ while IFS= read -r app_name; do
             continue
             ;;
     esac
+    backup_names=("$app_name")
+    special_backup=false
+    case "$app_name" in
+        qbittorrent-nox)
+            backup_names=(qbittorrent)
+            special_backup=true
+            ;;
+        jellyfin)
+            backup_names=(jellyfin-full)
+            special_backup=true
+            ;;
+        audiobookshelf)
+            backup_names=(audiobookshelf-config audiobookshelf-metadata)
+            special_backup=true
+            ;;
+    esac
 
-    # App identifiers and relative config paths are validated before use to
-    # prevent malformed repository data from escaping the checkout.
+    # App identifiers are validated before use to keep repository data bounded.
     if [[ ! $app_name =~ ^[A-Za-z0-9._-]+$ ]]; then
         log "ERROR: Invalid application name in apps.yaml: $app_name"
         record_result FAILED "$app_name" "invalid app name"
@@ -124,12 +139,18 @@ while IFS= read -r app_name; do
     fi
     log "Processing $app_name using resources/configs/$app_name.yaml"
     if BACKUP_ROOT="$backup_root" MEDIA_MOUNT="$media_mount" DRY_RUN="$dry_run" \
-        bash "$script_dir/restore-app.sh" "$app_name" "$config_file"; then
+        bash "$script_dir/restore-app.sh" "$app_name" "$config_file" "${backup_names[@]}"; then
         record_result RESTORED "$app_name"
     else
         result=$?
         case $result in
-            2) record_result SKIPPED "$app_name" "backup missing" ;;
+            2)
+                if [[ $special_backup == true ]]; then
+                    record_result FAILED "$app_name" "configured backup missing"
+                else
+                    record_result SKIPPED "$app_name" "backup missing"
+                fi
+                ;;
             3) record_result SKIPPED "$app_name" "DRY_RUN: restore preview only" ;;
             *) record_result FAILED "$app_name" "restore exited with status $result" ;;
         esac
