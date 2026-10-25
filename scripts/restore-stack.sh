@@ -15,7 +15,7 @@ fail() {
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 infra_repo_url=${INFRA_REPO_URL:-https://github.com/danyeles/jenkins-infra.git}
-infra_branch=${INFRA_BRANCH:-main}
+infra_branch=${INFRA_BRANCH:-master}
 backup_root=${BACKUP_ROOT:-/mnt/Backups/apps}
 media_mount=${MEDIA_MOUNT:-/mnt/Media}
 app_filter=${APP_NAME:-}
