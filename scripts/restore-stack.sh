@@ -101,6 +101,14 @@ while IFS= read -r app_name; do
     fi
     found_requested_app=true
 
+    case "$app_name" in
+        qbittorrent-password|flaresolverr|tdarr)
+            log "Skipping excluded application: $app_name"
+            record_result SKIPPED "$app_name" "excluded from restore"
+            continue
+            ;;
+    esac
+
     # App identifiers and relative config paths are validated before use to
     # prevent malformed repository data from escaping the checkout.
     if [[ ! $app_name =~ ^[A-Za-z0-9._-]+$ ]]; then

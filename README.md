@@ -35,6 +35,7 @@ The Jenkinsfile uses Jenkins' Pipeline `build` step to trigger each `deploy-<app
 
 - `scripts/restore-stack.sh` clones the infrastructure repository and reads its `apps.yaml`, then clones the shared-library repository.
 - For each app name in `apps.yaml`, the matching config YAML is loaded from `resources/configs/<app>.yaml` in the shared-library checkout. The script selects the unique volume ending in `:/config`; its host-side path is the restore target.
+- `qbittorrent-password`, `flaresolverr`, and `tdarr` are excluded from restore and reported as `SKIPPED`.
 - A missing `<app>/latest.tar.gz` is a warning and is reported as `SKIPPED`. Other per-app errors are reported as `FAILED`; processing continues for the remaining apps.
 - The final console report contains `RESTORED`, `SKIPPED`, and `FAILED` sections. Jenkins deployment is started only for entries reported as `RESTORED`.
 - Restore operations require `/mnt/Media` to be mounted and the backup directory to exist. Archives are checked for absolute and parent-traversal paths before extraction.
