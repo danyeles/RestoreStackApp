@@ -16,6 +16,8 @@ fail() {
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 infra_repo_url=${INFRA_REPO_URL:-https://github.com/danyeles/jenkins-infra.git}
 infra_branch=${INFRA_BRANCH:-master}
+shared_lib_repo_url=${SHARED_LIB_REPO_URL:-https://github.com/danyeles/jenkins-shared-lib.git}
+shared_lib_branch=${SHARED_LIB_BRANCH:-}
 backup_root=${BACKUP_ROOT:-/mnt/Backups/apps}
 media_mount=${MEDIA_MOUNT:-/mnt/Media}
 app_filter=${APP_NAME:-}
@@ -59,8 +61,17 @@ app_count=$(yq -r '.apps | length' "$apps_file") || fail "Unable to parse $apps_
 [[ $app_count =~ ^[0-9]+$ ]] && (( app_count > 0 )) || fail "apps.yaml contains no applications"
 log "Loaded $app_count applications from $apps_file"
 
-app_rows=$(yq -r '.apps[] | [.name, .config] | @tsv' "$apps_file") || fail "Unable to read app entries from $apps_file"
+app_rows=$(yq -r '.apps[] | .name' "$apps_file") || fail "Unable to read app entries from $apps_file"
 [[ -n $app_rows ]] || fail "apps.yaml did not provide any app entries"
+
+shared_lib_dir="$work_dir/jenkins-shared-lib"
+if [[ -n $shared_lib_branch ]]; then
+    if ! git clone --quiet --depth 1 --branch "$shared_lib_branch" "$shared_lib_repo_url" "$shared_lib_dir"; then
+        fail "Unable to clone $shared_lib_repo_url (branch: $shared_lib_branch)"
+    fi
+elif ! git clone --quiet --depth 1 "$shared_lib_repo_url" "$shared_lib_dir"; then
+    fail "Unable to clone $shared_lib_repo_url"
+fi
 
 restored=()
 skipped=()
@@ -83,7 +94,7 @@ record_result() {
     fi
 }
 
-while IFS=$'\t' read -r app_name config_path; do
+while IFS= read -r app_name; do
     [[ -n $app_name ]] || continue
     if [[ -n $app_filter && $app_name != "$app_filter" ]]; then
         continue
@@ -97,27 +108,13 @@ while IFS=$'\t' read -r app_name config_path; do
         record_result FAILED "$app_name" "invalid app name"
         continue
     fi
-    if [[ -z $config_path || $config_path == /* || $config_path == *$'\t'* || $config_path == *$'\n'* ]]; then
-        log "ERROR: Invalid config path for $app_name: $config_path"
-        record_result FAILED "$app_name" "invalid config path"
-        continue
-    fi
-    case "/$config_path/" in
-        */../*)
-            log "ERROR: Invalid config path for $app_name: $config_path"
-            record_result FAILED "$app_name" "invalid config path"
-            continue
-            ;;
-    esac
-
-    config_file="$infra_dir/$config_path"
+    config_file="$shared_lib_dir/resources/configs/$app_name.yaml"
     if [[ ! -f $config_file || ! -r $config_file ]]; then
-        log "ERROR: Config file for $app_name is missing or unreadable: $config_path"
+        log "ERROR: Config file for $app_name is missing or unreadable: resources/configs/$app_name.yaml"
         record_result FAILED "$app_name" "config missing"
         continue
     fi
-    log "Processing $app_name using $config_path"
-    log "Processing $app_name using $config_path"
+    log "Processing $app_name using resources/configs/$app_name.yaml"
     if BACKUP_ROOT="$backup_root" MEDIA_MOUNT="$media_mount" DRY_RUN="$dry_run" \
         bash "$script_dir/restore-app.sh" "$app_name" "$config_file"; then
         record_result RESTORED "$app_name"

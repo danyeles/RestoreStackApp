@@ -14,7 +14,7 @@ fail() {
 }
 
 if [[ $# -ne 2 ]]; then
-    fail "Usage: $0 <app-name> <config-yaml>"
+    fail "Usage: $0 <app-name> <shared-lib-config-yaml>"
 fi
 
 app_name=$1
@@ -28,7 +28,7 @@ if [[ ! $app_name =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 
 if [[ ! -f $config_file || ! -r $config_file ]]; then
-    fail "Configuration file is missing or unreadable: $config_file"
+    fail "Shared-library configuration file is missing or unreadable: $config_file"
 fi
 
 if ! command -v yq >/dev/null 2>&1; then
