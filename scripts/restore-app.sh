@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Restore one application's configuration archive into the host directory
-# mapped to the container's /config path.
+# Restore one application's configuration archive into its host-side config
+# directory, mapped to /config or /app/config in the container.
 set -uo pipefail
 
 log() {
@@ -59,22 +59,26 @@ if [[ ! -d $backup_root || ! -r $backup_root ]]; then
     fail "Backup storage is missing or unreadable: $backup_root"
 fi
 
-# Only a single /config bind mount is safe to restore automatically. Reject
+# Only a single config bind mount is safe to restore automatically. Reject
 # ambiguous or relative paths instead of guessing which host directory to use.
-volume_output=$(yq -r '.volumes[]? | select(tag == "!!str") | select(test(":/config$"))' "$config_file") \
+volume_output=$(yq -r '.volumes[]? | select(tag == "!!str") | select(test(":/((app/)?config)$"))' "$config_file") \
     || fail "Unable to read volumes from $config_file"
 mapfile -t config_mounts <<< "$volume_output"
 if [[ -z $volume_output ]]; then
     config_mounts=()
 fi
 if [[ ${#config_mounts[@]} -ne 1 ]]; then
-    fail "Expected exactly one volume ending in :/config in $config_file; found ${#config_mounts[@]}"
+    fail "Expected exactly one volume ending in :/config or :/app/config in $config_file; found ${#config_mounts[@]}"
 fi
 
 config_mount=${config_mounts[0]}
-target_dir=${config_mount%:/config}
+case "$config_mount" in
+    *:/app/config) target_dir=${config_mount%:/app/config} ;;
+    *:/config) target_dir=${config_mount%:/config} ;;
+    *) fail "Invalid config volume: $config_mount" ;;
+esac
 if [[ -z $target_dir || $target_dir != /* || $target_dir == / ]]; then
-    fail "The /config bind mount must have a non-root absolute host path: $config_mount"
+    fail "The config bind mount must have a non-root absolute host path: $config_mount"
 fi
 
 if ! command -v tar >/dev/null 2>&1; then

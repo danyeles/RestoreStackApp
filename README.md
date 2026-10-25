@@ -34,7 +34,7 @@ The Jenkinsfile uses Jenkins' Pipeline `build` step to trigger each `deploy-<app
 ## Restore behavior
 
 - `scripts/restore-stack.sh` clones the infrastructure repository and reads its `apps.yaml`, then clones the shared-library repository.
-- For each app name in `apps.yaml`, the matching config YAML is loaded from `resources/configs/<app>.yaml` in the shared-library checkout. The script selects the unique volume ending in `:/config`; its host-side path is the restore target.
+- For each app name in `apps.yaml`, the matching config YAML is loaded from `resources/configs/<app>.yaml` in the shared-library checkout. The script selects the unique volume ending in `:/config` or `:/app/config`; its host-side path is the restore target.
 - Backup names normally match the app name. Exceptions: `qbittorrent-nox` uses the `qbittorrent` backup, `jellyfin` uses `jellyfin-full`, and `audiobookshelf` restores `audiobookshelf-config` followed by `audiobookshelf-metadata`. All configured backups must exist before extraction starts; a missing special backup marks that app `FAILED`.
 - `qbittorrent-password`, `flaresolverr`, and `tdarr` are excluded from restore and reported as `SKIPPED`.
 - A missing default `<app>/latest.tar.gz` is a warning and is reported as `SKIPPED`. Other per-app errors are reported as `FAILED`; processing continues for the remaining apps.
