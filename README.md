@@ -40,7 +40,7 @@ The Jenkinsfile uses Jenkins' Pipeline `build` step to trigger each `deploy-<app
 - Use the Jenkins `SKIP_APPS` parameter or set `SKIP_APPS=sonarr,radarr` when running from a shell to skip selected applications. Names must exist in `apps.yaml`; invalid or unknown names stop the restore with an error.
 - A missing default `<app>/latest.tar.gz` is a warning and is reported as `SKIPPED`. Other per-app errors are reported as `FAILED`; processing continues for the remaining apps.
 - The final console report contains `RESTORED`, `SKIPPED`, and `FAILED` sections. Jenkins deployment is started only for entries reported as `RESTORED`.
-- Restore operations require `/mnt/Media` to be mounted and the backup directory to exist. Archives are checked for absolute and parent-traversal paths before extraction.
+- Restore operations require `/mnt/Media` to be mounted and the backup directory to exist. Archives are checked for absolute and parent-traversal paths before extraction. If an archive stores the original host path ending in `/config/`, RestoreStack strips that prefix so the backed-up files land directly in the current config mount.
 - Set `INFRA_BRANCH`, `INFRA_REPO_URL`, `SHARED_LIB_BRANCH`, `SHARED_LIB_REPO_URL`, `BACKUP_ROOT`, or `MEDIA_MOUNT` in Jenkins when your environment differs. The infrastructure branch defaults to `master`; when `SHARED_LIB_BRANCH` is unset, Git uses the shared library repository's default branch.
 
 ## Running from a shell

@@ -86,6 +86,7 @@ if ! command -v tar >/dev/null 2>&1; then
 fi
 
 archives=()
+archive_strip_components=()
 for backup_name in "${backup_names[@]}"; do
     if [[ ! $backup_name =~ ^[A-Za-z0-9._-]+$ ]]; then
         fail "Invalid backup name: $backup_name"
@@ -104,20 +105,53 @@ for backup_name in "${backup_names[@]}"; do
             fail "Unsafe path in backup archive: $member"
         fi
     done <<< "$archive_members"
+
+    strip_components=0
+    while IFS= read -r member; do
+        [[ $member == */config/ || $member == config/ ]] || continue
+        candidate=${member%/}
+        candidate_components=${candidate//[^\/]}
+        candidate_depth=$((${#candidate_components} + 1))
+        candidate_contains_archive=true
+
+        while IFS= read -r archive_member; do
+            trimmed_member=${archive_member%/}
+            if [[ $trimmed_member == "$candidate" || $trimmed_member == "$candidate/"* ]]; then
+                continue
+            fi
+            if [[ $archive_member == */ && $candidate == "$trimmed_member/"* ]]; then
+                continue
+            fi
+            candidate_contains_archive=false
+            break
+        done <<< "$archive_members"
+
+        if [[ $candidate_contains_archive == true ]] && \
+            (( strip_components == 0 || candidate_depth < strip_components )); then
+            strip_components=$candidate_depth
+        fi
+    done <<< "$archive_members"
+
+    if (( strip_components > 0 )); then
+        log "Archive $backup_name contains a config-root path; stripping $strip_components leading path components"
+    fi
     archives+=("$archive")
+    archive_strip_components+=("$strip_components")
 done
 
 if [[ $dry_run == true ]]; then
-    for archive in "${archives[@]}"; do
-        log "DRY_RUN: would extract $archive into $target_dir"
+    for index in "${!archives[@]}"; do
+        log "DRY_RUN: would extract ${archives[index]} into $target_dir (strip-components=${archive_strip_components[index]})"
     done
     exit 3
 fi
 
 mkdir -p -- "$target_dir" || fail "Unable to create restore target: $target_dir"
-for archive in "${archives[@]}"; do
+for index in "${!archives[@]}"; do
+    archive=${archives[index]}
     tar --extract --gzip --file="$archive" --directory="$target_dir" \
         --no-same-owner --no-same-permissions \
+        --strip-components="${archive_strip_components[index]}" \
         || fail "Extraction failed for $app_name from $archive"
 done
 
